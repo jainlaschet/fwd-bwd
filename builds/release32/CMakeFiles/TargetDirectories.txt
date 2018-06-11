@@ -1,0 +1,6 @@
+/Users/lashitjain/Projects/fwd-bwd/builds/release32/CMakeFiles/rebuild_cache.dir
+/Users/lashitjain/Projects/fwd-bwd/builds/release32/CMakeFiles/edit_cache.dir
+/Users/lashitjain/Projects/fwd-bwd/builds/release32/CMakeFiles/translate.dir
+/Users/lashitjain/Projects/fwd-bwd/builds/release32/search/CMakeFiles/rebuild_cache.dir
+/Users/lashitjain/Projects/fwd-bwd/builds/release32/search/CMakeFiles/edit_cache.dir
+/Users/lashitjain/Projects/fwd-bwd/builds/release32/search/CMakeFiles/downward.dir
