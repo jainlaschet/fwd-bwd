@@ -14,8 +14,41 @@
 #include <cstdlib>
 #include <memory>
 #include <set>
+#include <unordered_map>
 
 using namespace std;
+
+namespace fwdbwd{
+    unordered_map<OperatorID, vector<OperatorID> > dependency_map;
+
+    bool are_dependent(EffectsProxy eff, PreconditionsProxy pre)
+    {
+        // return true if there are some common facts else false
+        for(EffectProxy e: eff)
+            for (FactProxy p : pre)
+                if(p == e.get_fact())
+                    return true;
+        return false;
+    }
+
+
+    void generate_dependency_graph(TaskProxy task_proxy)
+    {
+        OperatorsProxy operators = task_proxy.get_operators();
+        
+        for (OperatorProxy op1 : operators)
+            for(OperatorProxy op2 : operators)
+            {
+                if(op1 != op2)
+                {
+                    EffectsProxy eff1 = op1.get_effects();
+                    PreconditionsProxy pre2 = op2.get_preconditions();
+                    if(are_dependent(eff1, pre2))
+                        dependency_map[op1.get_gid()].push_back(op2.get_gid());
+                }
+            }
+    }
+}
 
 namespace eager_search {
 EagerSearch::EagerSearch(const Options &opts)
