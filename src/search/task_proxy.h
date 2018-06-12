@@ -481,6 +481,11 @@ public:
         assert(!is_an_axiom);
         return task->get_global_operator_id(OperatorID(index));
     }
+
+    OperatorID get_gid() const{
+        return get_global_operator_id();
+    }
+
 };
 
 
