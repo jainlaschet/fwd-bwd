@@ -19,7 +19,8 @@
 using namespace std;
 
 namespace fwdbwd{
-    unordered_map<OperatorID, vector<OperatorID> > dependency_map;
+
+    std::unordered_map<OperatorID, std::vector<OperatorID> > dependency_map;
 
     bool are_dependent(EffectsProxy eff, PreconditionsProxy pre)
     {
@@ -48,6 +49,28 @@ namespace fwdbwd{
                 }
             }
     }
+
+    vector<FwdbwdOps> generate_fwdbwd_ops(vector<OperatorID> applicable_ops, OperatorID op_id)
+    {
+        vector<OperatorID> base_ops;
+        
+        if(op_id == OperatorID::no_operator)
+            base_ops = applicable_ops;
+        else
+            base_ops = dependency_map[op_id];
+
+        vector<FwdbwdOps> fwdbwd_ops;
+
+        for(OperatorID id: base_ops)
+        {
+            if(find(applicable_ops.begin(), applicable_ops.end(), id) != applicable_ops.end())
+                fwdbwd_ops.push_back(make_pair(id, true));
+            else
+                fwdbwd_ops.push_back(make_pair(id, false));
+        }
+        return fwdbwd_ops;
+    }
+
 }
 
 namespace eager_search {
@@ -56,7 +79,7 @@ EagerSearch::EagerSearch(const Options &opts)
       reopen_closed_nodes(opts.get<bool>("reopen_closed")),
       use_multi_path_dependence(opts.get<bool>("mpd")),
       open_list(opts.get<shared_ptr<OpenListFactory>>("open")->
-                create_state_open_list()),
+                create_edge_open_list()),
       f_evaluator(opts.get<Evaluator *>("f_eval", nullptr)),
       preferred_operator_heuristics(opts.get_list<Heuristic *>("preferred")),
       pruning_method(opts.get<shared_ptr<PruningMethod>>("pruning")) {
@@ -70,6 +93,10 @@ void EagerSearch::initialize() {
     if (use_multi_path_dependence)
         cout << "Using multi-path dependence (LM-A*)" << endl;
     assert(open_list);
+
+    // fwdbwd code
+    fwdbwd::generate_dependency_graph(task_proxy);
+    // fwdbwd code
 
     set<Evaluator *> evals;
     open_list->get_path_dependent_evaluators(evals);
@@ -109,7 +136,9 @@ void EagerSearch::initialize() {
         SearchNode node = search_space.get_node(initial_state);
         node.open_initial();
 
-        open_list->insert(eval_context, initial_state.get_id());
+        fwdbwd::FwdbwdNode fwdbwd_node(initial_state.get_id(), OperatorID::no_operator);
+
+        open_list->insert(eval_context, fwdbwd_node);
     }
 
     print_initial_h_values(eval_context);
@@ -130,13 +159,17 @@ void EagerSearch::print_statistics() const {
 }
 
 SearchStatus EagerSearch::step() {
-    pair<SearchNode, bool> n = fetch_next_node();
+    pair<fwdbwd::FwdbwdNode, bool> n = fetch_next_node();
     if (!n.second) {
         return FAILED;
     }
-    SearchNode node = n.first;
 
-    GlobalState s = node.get_state();
+    fwdbwd::FwdbwdNode fwdbwd_node = n.first;
+
+    StateID id = fwdbwd_node.first;
+    GlobalState s = state_registry.lookup_state(id);
+    SearchNode node = search_space.get_node(s);
+
     if (check_goal_and_set_plan(s))
         return SOLVED;
 
@@ -154,94 +187,103 @@ SearchStatus EagerSearch::step() {
     ordered_set::OrderedSet<OperatorID> preferred_operators =
         collect_preferred_operators(eval_context, preferred_operator_heuristics);
 
-    for (OperatorID op_id : applicable_ops) {
+    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, fwdbwd_node.second);
+
+
+    for (fwdbwd::FwdbwdOps fwdbwd_op: fwdbwd_ops) {
+
+        OperatorID op_id = fwdbwd_op.first;
         OperatorProxy op = task_proxy.get_operators()[op_id];
-        if ((node.get_real_g() + op.get_cost()) >= bound)
-            continue;
-
-        GlobalState succ_state = state_registry.get_successor_state(s, op);
-        statistics.inc_generated();
-        bool is_preferred = preferred_operators.contains(op_id);
-
-        SearchNode succ_node = search_space.get_node(succ_state);
-
-        // Previously encountered dead end. Don't re-evaluate.
-        if (succ_node.is_dead_end())
-            continue;
-
-        // update new path
-        if (use_multi_path_dependence || succ_node.is_new()) {
-            for (Evaluator *evaluator : path_dependent_evaluators) {
-                evaluator->notify_state_transition(s, op_id, succ_state);
-            }
-        }
-
-        if (succ_node.is_new()) {
-            // We have not seen this state before.
-            // Evaluate and create a new node.
-
-            // Careful: succ_node.get_g() is not available here yet,
-            // hence the stupid computation of succ_g.
-            // TODO: Make this less fragile.
-            int succ_g = node.get_g() + get_adjusted_cost(op);
-
-            EvaluationContext eval_context(
-                succ_state, succ_g, is_preferred, &statistics);
-            statistics.inc_evaluated_states();
-
-            if (open_list->is_dead_end(eval_context)) {
-                succ_node.mark_as_dead_end();
-                statistics.inc_dead_ends();
+        if(fwdbwd_op.second)
+        {
+            if ((node.get_real_g() + op.get_cost()) >= bound)
                 continue;
-            }
-            succ_node.open(node, op);
+            GlobalState succ_state = state_registry.get_successor_state(s, op);
+            statistics.inc_generated();
+            bool is_preferred = preferred_operators.contains(op_id);
 
-            open_list->insert(eval_context, succ_state.get_id());
-            if (search_progress.check_progress(eval_context)) {
-                print_checkpoint_line(succ_node.get_g());
-                reward_progress();
-            }
-        } else if (succ_node.get_g() > node.get_g() + get_adjusted_cost(op)) {
-            // We found a new cheapest path to an open or closed state.
-            if (reopen_closed_nodes) {
-                if (succ_node.is_closed()) {
-                    /*
-                      TODO: It would be nice if we had a way to test
-                      that reopening is expected behaviour, i.e., exit
-                      with an error when this is something where
-                      reopening should not occur (e.g. A* with a
-                      consistent heuristic).
-                    */
-                    statistics.inc_reopened();
+            SearchNode succ_node = search_space.get_node(succ_state);
+
+            // Previously encountered dead end. Don't re-evaluate.
+            if (succ_node.is_dead_end())
+                continue;
+
+            // update new path
+            if (use_multi_path_dependence || succ_node.is_new()) {
+                for (Evaluator *evaluator : path_dependent_evaluators) {
+                    evaluator->notify_state_transition(s, op_id, succ_state);
                 }
-                succ_node.reopen(node, op);
+            }
+
+            if (succ_node.is_new()) {
+                // We have not seen this state before.
+                // Evaluate and create a new node.
+
+                // Careful: succ_node.get_g() is not available here yet,
+                // hence the stupid computation of succ_g.
+                // TODO: Make this less fragile.
+                int succ_g = node.get_g() + get_adjusted_cost(op);
 
                 EvaluationContext eval_context(
-                    succ_state, succ_node.get_g(), is_preferred, &statistics);
+                    succ_state, succ_g, is_preferred, &statistics);
+                statistics.inc_evaluated_states();
 
-                /*
-                  Note: our old code used to retrieve the h value from
-                  the search node here. Our new code recomputes it as
-                  necessary, thus avoiding the incredible ugliness of
-                  the old "set_evaluator_value" approach, which also
-                  did not generalize properly to settings with more
-                  than one heuristic.
+                if (open_list->is_dead_end(eval_context)) {
+                    succ_node.mark_as_dead_end();
+                    statistics.inc_dead_ends();
+                    continue;
+                }
+                succ_node.open(node, op);
 
-                  Reopening should not happen all that frequently, so
-                  the performance impact of this is hopefully not that
-                  large. In the medium term, we want the heuristics to
-                  remember heuristic values for states themselves if
-                  desired by the user, so that such recomputations
-                  will just involve a look-up by the Heuristic object
-                  rather than a recomputation of the heuristic value
-                  from scratch.
-                */
-                open_list->insert(eval_context, succ_state.get_id());
-            } else {
-                // If we do not reopen closed nodes, we just update the parent pointers.
-                // Note that this could cause an incompatibility between
-                // the g-value and the actual path that is traced back.
-                succ_node.update_parent(node, op);
+                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id);
+                open_list->insert(eval_context, succ_fwdbwd_node);
+                if (search_progress.check_progress(eval_context)) {
+                    print_checkpoint_line(succ_node.get_g());
+                    reward_progress();
+                }
+            } else if (succ_node.get_g() > node.get_g() + get_adjusted_cost(op)) {
+                // We found a new cheapest path to an open or closed state.
+                if (reopen_closed_nodes) {
+                    if (succ_node.is_closed()) {
+                        /*
+                          TODO: It would be nice if we had a way to test
+                          that reopening is expected behaviour, i.e., exit
+                          with an error when this is something where
+                          reopening should not occur (e.g. A* with a
+                          consistent heuristic).
+                        */
+                        statistics.inc_reopened();
+                    }
+                    succ_node.reopen(node, op);
+
+                    EvaluationContext eval_context(
+                        succ_state, succ_node.get_g(), is_preferred, &statistics);
+
+                    /*
+                      Note: our old code used to retrieve the h value from
+                      the search node here. Our new code recomputes it as
+                      necessary, thus avoiding the incredible ugliness of
+                      the old "set_evaluator_value" approach, which also
+                      did not generalize properly to settings with more
+                      than one heuristic.
+
+                      Reopening should not happen all that frequently, so
+                      the performance impact of this is hopefully not that
+                      large. In the medium term, we want the heuristics to
+                      remember heuristic values for states themselves if
+                      desired by the user, so that such recomputations
+                      will just involve a look-up by the Heuristic object
+                      rather than a recomputation of the heuristic value
+                      from scratch.
+                    */
+                    fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id);
+                    open_list->insert(eval_context, succ_fwdbwd_node);
+                } else {
+                    // If we do not reopen closed nodes, we just update the parent pointers.
+                    // Note that this could cause an incompatibility between
+                    // the g-value and the actual path that is traced back.
+                    succ_node.update_parent(node, op);
+                }
             }
         }
     }
@@ -249,7 +291,7 @@ SearchStatus EagerSearch::step() {
     return IN_PROGRESS;
 }
 
-pair<SearchNode, bool> EagerSearch::fetch_next_node() {
+pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
     /* TODO: The bulk of this code deals with multi-path dependence,
        which is a bit unfortunate since that is a special case that
        makes the common case look more complicated than it would need
@@ -261,14 +303,14 @@ pair<SearchNode, bool> EagerSearch::fetch_next_node() {
     while (true) {
         if (open_list->empty()) {
             cout << "Completely explored state space -- no solution!" << endl;
-            // HACK! HACK! we do this because SearchNode has no default/copy constructor
-            const GlobalState &initial_state = state_registry.get_initial_state();
-            SearchNode dummy_node = search_space.get_node(initial_state);
+            fwdbwd::FwdbwdNode dummy_node(StateID::no_state, OperatorID::no_operator);
             return make_pair(dummy_node, false);
         }
         vector<int> last_key_removed;
-        StateID id = open_list->remove_min(
+        fwdbwd::FwdbwdNode fwdbwdNode = open_list->remove_min(
             use_multi_path_dependence ? &last_key_removed : nullptr);
+
+        StateID id = fwdbwdNode.first;
         // TODO is there a way we can avoid creating the state here and then
         //      recreate it outside of this function with node.get_state()?
         //      One way would be to store GlobalState objects inside SearchNodes
@@ -279,34 +321,34 @@ pair<SearchNode, bool> EagerSearch::fetch_next_node() {
         if (node.is_closed())
             continue;
 
-        if (use_multi_path_dependence) {
-            assert(last_key_removed.size() == 2);
-            if (node.is_dead_end())
-                continue;
-            int pushed_h = last_key_removed[1];
+        // if (use_multi_path_dependence) {
+        //     assert(last_key_removed.size() == 2);
+        //     if (node.is_dead_end())
+        //         continue;
+        //     int pushed_h = last_key_removed[1];
 
-            if (!node.is_closed()) {
-                EvaluationContext eval_context(
-                    node.get_state(), node.get_g(), false, &statistics);
+        //     if (!node.is_closed()) {
+        //         EvaluationContext eval_context(
+        //             node.get_state(), node.get_g(), false, &statistics);
 
-                if (open_list->is_dead_end(eval_context)) {
-                    node.mark_as_dead_end();
-                    statistics.inc_dead_ends();
-                    continue;
-                }
-                if (pushed_h < eval_context.get_result(path_dependent_evaluators[0]).get_h_value()) {
-                    assert(node.is_open());
-                    open_list->insert(eval_context, node.get_state_id());
-                    continue;
-                }
-            }
-        }
+        //         if (open_list->is_dead_end(eval_context)) {
+        //             node.mark_as_dead_end();
+        //             statistics.inc_dead_ends();
+        //             continue;
+        //         }
+        //         if (pushed_h < eval_context.get_result(path_dependent_evaluators[0]).get_h_value()) {
+        //             assert(node.is_open());
+        //             open_list->insert(eval_context, node.get_state_id());
+        //             continue;
+        //         }
+        //     }
+        // }
 
         node.close();
         assert(!node.is_dead_end());
         update_f_value_statistics(node);
         statistics.inc_expanded();
-        return make_pair(node, true);
+        return make_pair(fwdbwdNode, true);
     }
 }
 
