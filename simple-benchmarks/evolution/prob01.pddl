@@ -1,0 +1,6 @@
+(define (problem strips-evolution-x-1)
+   (:domain evolution-strips)
+   (:objects pikachu turtle)
+   (:init (poka pikachu)
+          (poka turtle))
+   (:goal (ultra turtle)))
