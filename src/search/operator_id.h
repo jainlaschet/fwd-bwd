@@ -2,6 +2,12 @@
 #define OPERATOR_ID_H
 
 #include <iostream>
+#include <vector>
+#include <unordered_set>
+#include <unordered_map>
+#include <utility>
+
+#include "state_id.h"
 
 /*
   OperatorIDs are used to define an operator that belongs to a given
@@ -48,6 +54,7 @@ public:
     }
 };
 
+
 std::ostream &operator<<(std::ostream &os, OperatorID id);
 
 namespace std {
@@ -58,5 +65,33 @@ struct hash<OperatorID> {
     }
 };
 }
+
+class OpStackNode{
+
+  // stores the value of the operator it represents
+  OperatorID op_id;
+  
+  OpStackNode* par;
+  std::unordered_map<OperatorID, OpStackNode*> children;
+
+  // represents stack size
+  int dep;
+  
+  // stores state for duplicate detection
+  std::unordered_set<StateID> state_storage;
+
+public:
+  OpStackNode(OperatorID operator_id, OpStackNode* parent, int depth=0);
+
+  OperatorID get_operator();
+  OpStackNode* get_parent();
+  int get_depth();
+
+  /* generates child, pair.second is false if state already requested here */
+  std::pair<OpStackNode*, bool> gen_child(OperatorID operator_id, StateID state_id);
+
+  // returns false if the state if already there, else true
+  bool store_state(StateID state_id);
+};
 
 #endif
