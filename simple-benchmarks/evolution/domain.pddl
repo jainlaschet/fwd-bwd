@@ -1,26 +1,18 @@
 (define (domain evolution-strips)
-   (:predicates (poka ?a)
-		(poke ?e)
-		(poki ?i)
-		(ultra ?u))
+   (:predicates (evol_first ?f)
+		(evol_second ?s)
+		(evol_third ?t)
+    (depend ?a ?b))
 
-   (:action ae
-       :parameters  (?a)
-       :precondition (poka ?a)
-       :effect (and  (poke ?a)
-		     (not (poka ?a))))
-		    
-   (:action ei
-       :parameters  (?e)
-       :precondition (poke ?e)
-       :effect (and  (poki ?e)
-		     (not (poke ?e))))
-   
-   (:action uia
-       :parameters  (?e ?i)
-       :precondition (and (poke ?e) (poki ?i))
-       :effect (and  (ultra ?i)
-		     (not (poki ?i))))
+   (:action stage_one
+       :parameters  (?a ?b)
+       :precondition (and (evol_first ?a) (depend ?a ?b) (evol_third ?b))
+       :effect (and  (evol_second ?a)
+		     (not (evol_first ?a))))
 
-
+   (:action stage_two
+       :parameters  (?a ?b)
+       :precondition (and (evol_second ?a) (depend ?a ?b) (evol_third ?b))
+       :effect (and  (evol_third ?a)
+         (not (evol_second ?a))))
 )
