@@ -130,6 +130,11 @@ StandardScalarOpenListFactory::create_edge_open_list() {
     return utils::make_unique_ptr<StandardScalarOpenList<EdgeOpenListEntry>>(options);
 }
 
+unique_ptr<FwdbwdOpenList>
+StandardScalarOpenListFactory::create_fwdbwd_open_list() {
+    return utils::make_unique_ptr<StandardScalarOpenList<FwdbwdOpenListEntry>>(options);
+}
+
 static shared_ptr<OpenListFactory> _parse(OptionParser &parser) {
     parser.document_synopsis(
         "Standard open list",

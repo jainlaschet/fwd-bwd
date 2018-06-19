@@ -146,6 +146,11 @@ AlternationOpenListFactory::create_edge_open_list() {
     return utils::make_unique_ptr<AlternationOpenList<EdgeOpenListEntry>>(options);
 }
 
+unique_ptr<FwdbwdOpenList>
+AlternationOpenListFactory::create_fwdbwd_open_list() {
+    return utils::make_unique_ptr<AlternationOpenList<FwdbwdOpenListEntry>>(options);
+}
+
 static shared_ptr<OpenListFactory> _parse(OptionParser &parser) {
     parser.document_synopsis("Alternation open list",
                              "alternates between several open lists.");

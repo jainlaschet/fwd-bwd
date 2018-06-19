@@ -241,6 +241,11 @@ ParetoOpenListFactory::create_edge_open_list() {
     return utils::make_unique_ptr<ParetoOpenList<EdgeOpenListEntry>>(options);
 }
 
+unique_ptr<FwdbwdOpenList>
+ParetoOpenListFactory::create_fwdbwd_open_list() {
+    return utils::make_unique_ptr<ParetoOpenList<FwdbwdOpenListEntry>>(options);
+}
+
 static shared_ptr<OpenListFactory> _parse(OptionParser &parser) {
     parser.document_synopsis(
         "Pareto open list",

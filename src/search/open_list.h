@@ -135,10 +135,11 @@ public:
 
 using StateOpenListEntry = StateID;
 using EdgeOpenListEntry = std::pair<StateID, OperatorID>;
+using FwdbwdOpenListEntry = std::tuple<StateID, OperatorID, OpStackNode*>;
 
 using StateOpenList = OpenList<StateOpenListEntry>;
 using EdgeOpenList = OpenList<EdgeOpenListEntry>;
-
+using FwdbwdOpenList = OpenList<FwdbwdOpenListEntry>;
 
 template<class Entry>
 OpenList<Entry>::OpenList(bool only_preferred)

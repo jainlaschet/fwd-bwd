@@ -156,6 +156,11 @@ TypeBasedOpenListFactory::create_edge_open_list() {
     return utils::make_unique_ptr<TypeBasedOpenList<EdgeOpenListEntry>>(options);
 }
 
+unique_ptr<FwdbwdOpenList>
+TypeBasedOpenListFactory::create_fwdbwd_open_list() {
+    return utils::make_unique_ptr<TypeBasedOpenList<FwdbwdOpenListEntry>>(options);
+}
+
 static shared_ptr<OpenListFactory> _parse(OptionParser &parser) {
     parser.document_synopsis(
         "Type-based open list",

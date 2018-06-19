@@ -15,6 +15,7 @@ public:
 
     virtual std::unique_ptr<StateOpenList> create_state_open_list() = 0;
     virtual std::unique_ptr<EdgeOpenList> create_edge_open_list() = 0;
+    virtual std::unique_ptr<FwdbwdOpenList> create_fwdbwd_open_list() = 0;
 
     /*
       The following template receives manual specializations (in the

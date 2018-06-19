@@ -156,6 +156,11 @@ TieBreakingOpenListFactory::create_edge_open_list() {
     return utils::make_unique_ptr<TieBreakingOpenList<EdgeOpenListEntry>>(options);
 }
 
+unique_ptr<FwdbwdOpenList>
+TieBreakingOpenListFactory::create_fwdbwd_open_list() {
+    return utils::make_unique_ptr<TieBreakingOpenList<FwdbwdOpenListEntry>>(options);
+}
+
 static shared_ptr<OpenListFactory> _parse(OptionParser &parser) {
     parser.document_synopsis("Tie-breaking open list", "");
     parser.add_list_option<Evaluator *>("evals", "evaluators");

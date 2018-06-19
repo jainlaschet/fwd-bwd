@@ -15,6 +15,10 @@ unique_ptr<EdgeOpenList> OpenListFactory::create_open_list() {
     return create_edge_open_list();
 }
 
+template<>
+unique_ptr<FwdbwdOpenList> OpenListFactory::create_open_list() {
+    return create_fwdbwd_open_list();
+}
 
 static PluginTypePlugin<OpenListFactory> _type_plugin(
     "OpenList",
