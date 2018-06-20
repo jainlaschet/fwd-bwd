@@ -76,13 +76,13 @@ class OpStackNode{
   std::unordered_map<OperatorID, OpStackNode*> children;
 
   // represents stack size
-  int dep;
+  int depth;
   
   // stores state for duplicate detection
   std::unordered_set<StateID> state_storage;
 
 public:
-  OpStackNode(OperatorID operator_id, OpStackNode* parent, int depth=0);
+  OpStackNode(OperatorID operator_id, OpStackNode* parent);
 
   OperatorID get_operator();
   OpStackNode* get_parent();

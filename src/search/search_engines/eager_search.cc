@@ -21,6 +21,7 @@ using namespace std;
 namespace fwdbwd{
 
     std::unordered_map<OperatorID, std::vector<OperatorID> > dependency_map;
+    OpStackNode stack_root = OpStackNode(OperatorID::no_operator, NULL);
 
     bool are_dependent(EffectsProxy eff, PreconditionsProxy pre)
     {

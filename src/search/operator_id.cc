@@ -12,10 +12,13 @@ ostream &operator<<(ostream &os, OperatorID id) {
 const OperatorID OperatorID::no_operator = OperatorID(-1);
 
 
-OpStackNode::OpStackNode(OperatorID operator_id, OpStackNode* parent, int depth)
+OpStackNode::OpStackNode(OperatorID operator_id, OpStackNode* parent)
 : op_id(operator_id), par(parent)
 {
-	dep = depth;
+	if(parent == NULL)
+		depth = 0;
+	else
+		depth = parent->depth + 1;
 }
 
 OperatorID OpStackNode::get_operator(){
@@ -25,8 +28,9 @@ OperatorID OpStackNode::get_operator(){
 OpStackNode* OpStackNode::get_parent(){
 	return par;
 }
+
 int OpStackNode::get_depth(){
-	return dep;
+	return depth;
 }
 
 /* generates child, pair.second is false if state already requested stack */
@@ -39,7 +43,7 @@ std::pair<OpStackNode*, bool> OpStackNode::gen_child(OperatorID operator_id, Sta
 	}
 	else
 	{
-		OpStackNode* child = new OpStackNode(operator_id, this, dep+1);
+		OpStackNode* child = new OpStackNode(operator_id, this);
 		child->store_state(state_id);
 		children[operator_id] = child;
 		return std::make_pair(child, true);
