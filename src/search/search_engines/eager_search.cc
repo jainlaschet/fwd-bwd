@@ -80,7 +80,7 @@ EagerSearch::EagerSearch(const Options &opts)
       reopen_closed_nodes(opts.get<bool>("reopen_closed")),
       use_multi_path_dependence(opts.get<bool>("mpd")),
       open_list(opts.get<shared_ptr<OpenListFactory>>("open")->
-                create_edge_open_list()),
+                create_fwdbwd_open_list()),
       f_evaluator(opts.get<Evaluator *>("f_eval", nullptr)),
       preferred_operator_heuristics(opts.get_list<Heuristic *>("preferred")),
       pruning_method(opts.get<shared_ptr<PruningMethod>>("pruning")) {
@@ -137,7 +137,8 @@ void EagerSearch::initialize() {
         SearchNode node = search_space.get_node(initial_state);
         node.open_initial();
 
-        fwdbwd::FwdbwdNode fwdbwd_node(initial_state.get_id(), OperatorID::no_operator);
+        //TODO: Change this
+        fwdbwd::FwdbwdNode fwdbwd_node(initial_state.get_id(), OperatorID::no_operator, NULL);
 
         open_list->insert(eval_context, fwdbwd_node);
     }
@@ -165,9 +166,11 @@ SearchStatus EagerSearch::step() {
         return FAILED;
     }
 
+    //FWDBWD: Check if this is a backward node.
+
     fwdbwd::FwdbwdNode fwdbwd_node = n.first;
 
-    StateID id = fwdbwd_node.first;
+    StateID id = get<0>(fwdbwd_node);
     GlobalState s = state_registry.lookup_state(id);
     SearchNode node = search_space.get_node(s);
 
@@ -188,7 +191,8 @@ SearchStatus EagerSearch::step() {
     ordered_set::OrderedSet<OperatorID> preferred_operators =
         collect_preferred_operators(eval_context, preferred_operator_heuristics);
 
-    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, fwdbwd_node.second);
+    // FWDBWD: Thread should not come here if the node is not forward node
+    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, get<1>(fwdbwd_node));
 
 
     for (fwdbwd::FwdbwdOps fwdbwd_op: fwdbwd_ops) {
@@ -236,7 +240,7 @@ SearchStatus EagerSearch::step() {
                 }
                 succ_node.open(node, op);
 
-                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id);
+                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL);
                 open_list->insert(eval_context, succ_fwdbwd_node);
                 if (search_progress.check_progress(eval_context)) {
                     print_checkpoint_line(succ_node.get_g());
@@ -277,7 +281,7 @@ SearchStatus EagerSearch::step() {
                       rather than a recomputation of the heuristic value
                       from scratch.
                     */
-                    fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id);
+                    fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL);
                     open_list->insert(eval_context, succ_fwdbwd_node);
                 } else {
                     // If we do not reopen closed nodes, we just update the parent pointers.
@@ -304,14 +308,14 @@ pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
     while (true) {
         if (open_list->empty()) {
             cout << "Completely explored state space -- no solution!" << endl;
-            fwdbwd::FwdbwdNode dummy_node(StateID::no_state, OperatorID::no_operator);
+            fwdbwd::FwdbwdNode dummy_node(StateID::no_state, OperatorID::no_operator, NULL);
             return make_pair(dummy_node, false);
         }
         vector<int> last_key_removed;
         fwdbwd::FwdbwdNode fwdbwdNode = open_list->remove_min(
             use_multi_path_dependence ? &last_key_removed : nullptr);
 
-        StateID id = fwdbwdNode.first;
+        StateID id = get<0>(fwdbwdNode);
         // TODO is there a way we can avoid creating the state here and then
         //      recreate it outside of this function with node.get_state()?
         //      One way would be to store GlobalState objects inside SearchNodes
@@ -319,9 +323,13 @@ pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
         GlobalState s = state_registry.lookup_state(id);
         SearchNode node = search_space.get_node(s);
 
-        if (node.is_closed())
-            continue;
+        // FWDBWD: Add code for checking if this node is repeated
 
+        // FWDBWD: No need to close nodes
+        // if (node.is_closed())
+        //     continue;
+
+        // FWDBWD: Pending task
         // if (use_multi_path_dependence) {
         //     assert(last_key_removed.size() == 2);
         //     if (node.is_dead_end())
@@ -345,7 +353,8 @@ pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
         //     }
         // }
 
-        node.close();
+        // FWDBWD: No need to close the nodes
+        // node.close();
         assert(!node.is_dead_end());
         update_f_value_statistics(node);
         statistics.inc_expanded();

@@ -20,7 +20,7 @@ class Options;
 
 namespace fwdbwd{
     //TODO: change this to tuple
-    using FwdbwdNode = std::pair<StateID, OperatorID>;
+    using FwdbwdNode = std::tuple<StateID, OperatorID, OpStackNode*>;
     using FwdbwdOps = std::pair<OperatorID, bool>;
 }
 
@@ -30,7 +30,7 @@ class EagerSearch : public SearchEngine {
     const bool use_multi_path_dependence;
 
     // TODO: change this to FwdbwdOpenList
-    std::unique_ptr<EdgeOpenList> open_list;
+    std::unique_ptr<FwdbwdOpenList> open_list;
     Evaluator *f_evaluator;
 
     std::vector<Evaluator *> path_dependent_evaluators;
