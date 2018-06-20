@@ -19,7 +19,6 @@ class Options;
 }
 
 namespace fwdbwd{
-    //TODO: change this to tuple
     using FwdbwdNode = std::tuple<StateID, OperatorID, OpStackNode*>;
     using FwdbwdOps = std::pair<OperatorID, bool>;
 }
@@ -29,7 +28,6 @@ class EagerSearch : public SearchEngine {
     const bool reopen_closed_nodes;
     const bool use_multi_path_dependence;
 
-    // TODO: change this to FwdbwdOpenList
     std::unique_ptr<FwdbwdOpenList> open_list;
     Evaluator *f_evaluator;
 

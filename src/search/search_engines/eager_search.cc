@@ -137,7 +137,6 @@ void EagerSearch::initialize() {
         SearchNode node = search_space.get_node(initial_state);
         node.open_initial();
 
-        //TODO: Change this
         fwdbwd::FwdbwdNode fwdbwd_node(initial_state.get_id(), OperatorID::no_operator, NULL);
 
         open_list->insert(eval_context, fwdbwd_node);
@@ -221,12 +220,6 @@ SearchStatus EagerSearch::step() {
             }
 
             if (succ_node.is_new()) {
-                // We have not seen this state before.
-                // Evaluate and create a new node.
-
-                // Careful: succ_node.get_g() is not available here yet,
-                // hence the stupid computation of succ_g.
-                // TODO: Make this less fragile.
                 int succ_g = node.get_g() + get_adjusted_cost(op);
 
                 EvaluationContext eval_context(
@@ -247,16 +240,8 @@ SearchStatus EagerSearch::step() {
                     reward_progress();
                 }
             } else if (succ_node.get_g() > node.get_g() + get_adjusted_cost(op)) {
-                // We found a new cheapest path to an open or closed state.
                 if (reopen_closed_nodes) {
                     if (succ_node.is_closed()) {
-                        /*
-                          TODO: It would be nice if we had a way to test
-                          that reopening is expected behaviour, i.e., exit
-                          with an error when this is something where
-                          reopening should not occur (e.g. A* with a
-                          consistent heuristic).
-                        */
                         statistics.inc_reopened();
                     }
                     succ_node.reopen(node, op);
@@ -264,29 +249,9 @@ SearchStatus EagerSearch::step() {
                     EvaluationContext eval_context(
                         succ_state, succ_node.get_g(), is_preferred, &statistics);
 
-                    /*
-                      Note: our old code used to retrieve the h value from
-                      the search node here. Our new code recomputes it as
-                      necessary, thus avoiding the incredible ugliness of
-                      the old "set_evaluator_value" approach, which also
-                      did not generalize properly to settings with more
-                      than one heuristic.
-
-                      Reopening should not happen all that frequently, so
-                      the performance impact of this is hopefully not that
-                      large. In the medium term, we want the heuristics to
-                      remember heuristic values for states themselves if
-                      desired by the user, so that such recomputations
-                      will just involve a look-up by the Heuristic object
-                      rather than a recomputation of the heuristic value
-                      from scratch.
-                    */
                     fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL);
                     open_list->insert(eval_context, succ_fwdbwd_node);
                 } else {
-                    // If we do not reopen closed nodes, we just update the parent pointers.
-                    // Note that this could cause an incompatibility between
-                    // the g-value and the actual path that is traced back.
                     succ_node.update_parent(node, op);
                 }
             }
@@ -297,13 +262,6 @@ SearchStatus EagerSearch::step() {
 }
 
 pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
-    /* TODO: The bulk of this code deals with multi-path dependence,
-       which is a bit unfortunate since that is a special case that
-       makes the common case look more complicated than it would need
-       to be. We could refactor this by implementing multi-path
-       dependence as a separate search algorithm that wraps the "usual"
-       search algorithm and adds the extra processing in the desired
-       places. I think this would lead to much cleaner code. */
 
     while (true) {
         if (open_list->empty()) {
@@ -316,10 +274,6 @@ pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
             use_multi_path_dependence ? &last_key_removed : nullptr);
 
         StateID id = get<0>(fwdbwdNode);
-        // TODO is there a way we can avoid creating the state here and then
-        //      recreate it outside of this function with node.get_state()?
-        //      One way would be to store GlobalState objects inside SearchNodes
-        //      instead of StateIDs
         GlobalState s = state_registry.lookup_state(id);
         SearchNode node = search_space.get_node(s);
 
