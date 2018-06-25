@@ -135,7 +135,7 @@ public:
 
 using StateOpenListEntry = StateID;
 using EdgeOpenListEntry = std::pair<StateID, OperatorID>;
-using FwdbwdOpenListEntry = std::tuple<StateID, OperatorID, OpStackNode*>;
+using FwdbwdOpenListEntry = fwdbwd::FwdbwdNode;
 
 using StateOpenList = OpenList<StateOpenListEntry>;
 using EdgeOpenList = OpenList<EdgeOpenListEntry>;

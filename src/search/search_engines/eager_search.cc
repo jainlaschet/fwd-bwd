@@ -20,8 +20,10 @@ using namespace std;
 
 namespace fwdbwd{
 
-    std::unordered_map<OperatorID, std::vector<OperatorID> > dependency_map;
-    OpStackNode stack_root = OpStackNode(OperatorID::no_operator, NULL);
+    unordered_map<OperatorID, vector<OperatorID> > dependency_map;
+    unordered_map<OperatorID, vector<OperatorID> > inverse_map;   
+    OpStackNode* stack_root = new OpStackNode(OperatorID::no_operator, NULL);
+    unordered_map<StateID, unordered_set<OperatorID> > forward_nodes;
 
     bool are_dependent(EffectsProxy eff, PreconditionsProxy pre)
     {
@@ -31,6 +33,23 @@ namespace fwdbwd{
                 if(p == e.get_fact())
                     return true;
         return false;
+    }
+
+    FwdbwdNode::FwdbwdNode(StateID state_id, OperatorID operator_id, OpStackNode* op_stack_node, int g_value):
+    id(state_id), op_id(operator_id)
+    {
+        op_stack = op_stack_node;
+        state_g_value = g_value;
+    }
+
+    bool FwdbwdNode::operator<(const FwdbwdNode& rhs) const{
+        if(op_stack == NULL && rhs.get_stack_pointer() == NULL)
+            return state_g_value < rhs.get_g();
+
+        else if(op_stack != NULL && rhs.get_stack_pointer() != NULL)
+            return op_stack->get_depth() < rhs.get_stack_pointer()->get_depth();
+        else
+            return (op_stack == NULL)? true: false;
     }
 
 
@@ -43,10 +62,13 @@ namespace fwdbwd{
             {
                 if(op1 != op2)
                 {
-                    EffectsProxy eff1 = op1.get_effects();
-                    PreconditionsProxy pre2 = op2.get_preconditions();
-                    if(are_dependent(eff1, pre2))
+                    PreconditionsProxy pre1 = op1.get_preconditions();
+                    EffectsProxy eff2 = op2.get_effects();
+                    if(are_dependent(eff2, pre1))
+                    {
                         dependency_map[op1.get_gid()].push_back(op2.get_gid());
+                        inverse_map[op2.get_gid()].push_back(op1.get_gid());
+                    }
                 }
             }
     }
@@ -58,7 +80,7 @@ namespace fwdbwd{
         if(op_id == OperatorID::no_operator)
             base_ops = applicable_ops;
         else
-            base_ops = dependency_map[op_id];
+            base_ops = inverse_map[op_id];
 
         vector<FwdbwdOps> fwdbwd_ops;
 
@@ -69,6 +91,7 @@ namespace fwdbwd{
             else
                 fwdbwd_ops.push_back(make_pair(id, false));
         }
+
         return fwdbwd_ops;
     }
 
@@ -137,7 +160,7 @@ void EagerSearch::initialize() {
         SearchNode node = search_space.get_node(initial_state);
         node.open_initial();
 
-        fwdbwd::FwdbwdNode fwdbwd_node(initial_state.get_id(), OperatorID::no_operator, NULL);
+        fwdbwd::FwdbwdNode fwdbwd_node(initial_state.get_id(), OperatorID::no_operator, NULL, node.get_real_g());
 
         open_list->insert(eval_context, fwdbwd_node);
     }
@@ -165,11 +188,18 @@ SearchStatus EagerSearch::step() {
         return FAILED;
     }
 
-    //FWDBWD: Check if this is a backward node.
-
     fwdbwd::FwdbwdNode fwdbwd_node = n.first;
 
-    StateID id = get<0>(fwdbwd_node);
+    if(!fwdbwd_node.get_stack_pointer())
+        return forward_step(fwdbwd_node);
+    else
+        return backward_step(fwdbwd_node);
+}
+
+SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
+{
+    // Get the search node from id
+    StateID id = fwdbwd_node.get_state();
     GlobalState s = state_registry.lookup_state(id);
     SearchNode node = search_space.get_node(s);
 
@@ -179,10 +209,6 @@ SearchStatus EagerSearch::step() {
     vector<OperatorID> applicable_ops;
     g_successor_generator->generate_applicable_ops(s, applicable_ops);
 
-    /*
-      TODO: When preferred operators are in use, a preferred operator will be
-      considered by the preferred operator queues even when it is pruned.
-    */
     pruning_method->prune_operators(s, applicable_ops);
 
     // This evaluates the expanded state (again) to get preferred ops
@@ -190,8 +216,7 @@ SearchStatus EagerSearch::step() {
     ordered_set::OrderedSet<OperatorID> preferred_operators =
         collect_preferred_operators(eval_context, preferred_operator_heuristics);
 
-    // FWDBWD: Thread should not come here if the node is not forward node
-    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, get<1>(fwdbwd_node));
+    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, fwdbwd_node.get_operator());
 
 
     for (fwdbwd::FwdbwdOps fwdbwd_op: fwdbwd_ops) {
@@ -203,8 +228,10 @@ SearchStatus EagerSearch::step() {
             if ((node.get_real_g() + op.get_cost()) >= bound)
                 continue;
             GlobalState succ_state = state_registry.get_successor_state(s, op);
+            //FWDBWD: What do they consider when counting generated nodes? What if an old node is generated?
             statistics.inc_generated();
             bool is_preferred = preferred_operators.contains(op_id);
+
 
             SearchNode succ_node = search_space.get_node(succ_state);
 
@@ -233,31 +260,180 @@ SearchStatus EagerSearch::step() {
                 }
                 succ_node.open(node, op);
 
-                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL);
+                // succ_node.store_foward_operator(op_id);
+                fwdbwd::forward_nodes[succ_state.get_id()].insert(op_id);
+
+                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL, succ_node.get_real_g());
                 open_list->insert(eval_context, succ_fwdbwd_node);
                 if (search_progress.check_progress(eval_context)) {
                     print_checkpoint_line(succ_node.get_g());
                     reward_progress();
                 }
-            } else if (succ_node.get_g() > node.get_g() + get_adjusted_cost(op)) {
-                if (reopen_closed_nodes) {
-                    if (succ_node.is_closed()) {
-                        statistics.inc_reopened();
-                    }
-                    succ_node.reopen(node, op);
-
+            }
+            else{
+                if(succ_node.get_g() > node.get_g() + get_adjusted_cost(op))
+                    succ_node.update_parent(succ_node, op);
+                
+                // FWDBWD: Check if the same operator and state pair has not been seen before
+                if(fwdbwd::forward_nodes[succ_state.get_id()].find(op_id) == fwdbwd::forward_nodes[succ_state.get_id()].end())
+                {
+                    fwdbwd::forward_nodes[succ_state.get_id()].insert(op_id);
                     EvaluationContext eval_context(
                         succ_state, succ_node.get_g(), is_preferred, &statistics);
-
-                    fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL);
+                    fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL, succ_node.get_real_g());
                     open_list->insert(eval_context, succ_fwdbwd_node);
-                } else {
-                    succ_node.update_parent(node, op);
+                }
+            }   
+        }
+        else
+        {
+            // push the current and all it's dependent ones on the stack
+            // also check if you've observed the same pair before
+            pair<OpStackNode*, bool> first_child = fwdbwd::stack_root->gen_child(op_id, id);
+            if(first_child.second)
+            {
+                // careful op_id already in use
+                for (OperatorID oid: fwdbwd::dependency_map[op_id])
+                {
+                    pair<OpStackNode*, bool> second_child = (first_child.first)->gen_child(oid, id);
+                    if(second_child.second)
+                    {
+                        // Now push this backward into the open list
+                        fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, second_child.first, node.get_real_g());
+                        open_list->insert(eval_context, succ_fwdbwd_node);
+                    }
                 }
             }
         }
     }
 
+    return IN_PROGRESS;
+
+
+}
+
+SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
+{
+    OpStackNode* op_stack_node = fwdbwd_node.get_stack_pointer();
+    assert(op_stack_node != NULL);
+
+    StateID id = fwdbwd_node.get_state();
+    GlobalState s = state_registry.lookup_state(id);
+    SearchNode node = search_space.get_node(s);
+
+    if (check_goal_and_set_plan(s))
+        return SOLVED;
+
+    vector<OperatorID> applicable_ops;
+    g_successor_generator->generate_applicable_ops(s, applicable_ops);
+
+    pruning_method->prune_operators(s, applicable_ops);
+
+    EvaluationContext eval_context(s, node.get_g(), false, &statistics, true);
+
+    ordered_set::OrderedSet<OperatorID> preferred_operators =
+        collect_preferred_operators(eval_context, preferred_operator_heuristics);
+        
+
+    if(find(applicable_ops.begin(), applicable_ops.end(), op_stack_node->get_operator()) != applicable_ops.end())
+    {
+        // apply the top stack operator to the current state
+        // and push the data entry into the new stack
+        // if the current operator_stack_pointer is equal to stack_root
+        // then stop the search
+        OperatorID op_id = op_stack_node->get_operator();
+        OperatorProxy op = task_proxy.get_operators()[op_id];
+        bool is_preferred = preferred_operators.contains(op_id);
+
+        if ((node.get_real_g() + op.get_cost()) >= bound)
+            return IN_PROGRESS;
+        GlobalState succ_state = state_registry.get_successor_state(s, op);
+        //FWDBWD: What do they consider when counting generated nodes? What if an old node is generated?
+        statistics.inc_generated();
+
+        SearchNode succ_node = search_space.get_node(succ_state);
+
+        // Previously encountered dead end. Don't re-evaluate.
+        if (succ_node.is_dead_end())
+            return IN_PROGRESS;
+
+        // update new path
+        if (use_multi_path_dependence || succ_node.is_new()) {
+            for (Evaluator *evaluator : path_dependent_evaluators) {
+                evaluator->notify_state_transition(s, op_id, succ_state);
+            }
+        }
+
+        if (succ_node.is_new()) {
+            int succ_g = node.get_g() + get_adjusted_cost(op);
+            EvaluationContext eval_context(
+                succ_state, succ_g, is_preferred, &statistics);
+            statistics.inc_evaluated_states();
+
+            if (open_list->is_dead_end(eval_context)) {
+                succ_node.mark_as_dead_end();
+                statistics.inc_dead_ends();
+                return IN_PROGRESS;
+            }
+            succ_node.open(node, op);
+
+            OpStackNode* parent_op_stack_node = op_stack_node->get_parent();
+            parent_op_stack_node->store_state(succ_state.get_id());
+
+            if(parent_op_stack_node == fwdbwd::stack_root)
+            {
+                fwdbwd::forward_nodes[succ_state.get_id()].insert(op_id);
+                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL, succ_node.get_real_g());
+                open_list->insert(eval_context, succ_fwdbwd_node);
+            }
+            else
+            {
+                fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), OperatorID::no_operator, parent_op_stack_node, succ_node.get_real_g());
+                open_list->insert(eval_context, succ_fwdbwd_node);
+            }
+            if (search_progress.check_progress(eval_context)) {
+                print_checkpoint_line(succ_node.get_g());
+                reward_progress();
+            }
+        }
+        else{
+            if(succ_node.get_g() > node.get_g() + get_adjusted_cost(op))
+                succ_node.update_parent(succ_node, op);
+            OpStackNode* parent_op_stack_node = op_stack_node->get_parent();
+            bool flag = parent_op_stack_node->store_state(succ_state.get_id());
+            if(flag)
+            {
+                EvaluationContext eval_context(
+                    succ_state, succ_node.get_g(), is_preferred, &statistics);
+                if(parent_op_stack_node == fwdbwd::stack_root)
+                {
+                    if(fwdbwd::forward_nodes[succ_state.get_id()].find(op_id) == fwdbwd::forward_nodes[succ_state.get_id()].end())
+                    {
+                        fwdbwd::forward_nodes[succ_state.get_id()].insert(op_id);
+                        fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL, succ_node.get_real_g());
+                        open_list->insert(eval_context, succ_fwdbwd_node);
+                    }
+                }
+                else
+                {
+                    fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), OperatorID::no_operator, parent_op_stack_node, succ_node.get_real_g());
+                    open_list->insert(eval_context, succ_fwdbwd_node);
+                }
+            }
+        }
+    }
+    else
+    {
+        for (OperatorID oid : (fwdbwd::dependency_map[op_stack_node->get_operator()]))
+        {
+            pair<OpStackNode*, bool> child = op_stack_node->gen_child(oid, id);
+            if(child.second)
+            {
+                fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, child.first, fwdbwd_node.get_g());
+                open_list->insert(eval_context, succ_fwdbwd_node);
+            }
+        }
+    }
     return IN_PROGRESS;
 }
 
@@ -266,20 +442,20 @@ pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
     while (true) {
         if (open_list->empty()) {
             cout << "Completely explored state space -- no solution!" << endl;
-            fwdbwd::FwdbwdNode dummy_node(StateID::no_state, OperatorID::no_operator, NULL);
+            fwdbwd::FwdbwdNode dummy_node(StateID::no_state, OperatorID::no_operator, NULL, 0);
             return make_pair(dummy_node, false);
         }
         vector<int> last_key_removed;
         fwdbwd::FwdbwdNode fwdbwdNode = open_list->remove_min(
             use_multi_path_dependence ? &last_key_removed : nullptr);
 
-        StateID id = get<0>(fwdbwdNode);
+        StateID id = fwdbwdNode.get_state();
         GlobalState s = state_registry.lookup_state(id);
         SearchNode node = search_space.get_node(s);
 
         // FWDBWD: Add code for checking if this node is repeated
 
-        // FWDBWD: No need to close nodes
+        // FWDBWD: No need to close nodes?
         // if (node.is_closed())
         //     continue;
 
@@ -310,7 +486,17 @@ pair<fwdbwd::FwdbwdNode, bool> EagerSearch::fetch_next_node() {
         // FWDBWD: No need to close the nodes
         // node.close();
         assert(!node.is_dead_end());
+        /* FWDBWD: Should it be updated for backwards node? 
+        We might be in a loop error or something
+        if EvaluationContext is considering f_value_statistics in
+        that sense.
+        */
         update_f_value_statistics(node);
+        /*
+        FWDBWD: Should this be counted as expanded? 
+        When reopen_closed_node was there, we did count it as expanded.
+        Look for how it effects search and stuff.
+        */
         statistics.inc_expanded();
         return make_pair(fwdbwdNode, true);
     }

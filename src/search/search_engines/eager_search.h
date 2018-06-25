@@ -18,11 +18,6 @@ namespace options {
 class Options;
 }
 
-namespace fwdbwd{
-    using FwdbwdNode = std::tuple<StateID, OperatorID, OpStackNode*>;
-    using FwdbwdOps = std::pair<OperatorID, bool>;
-}
-
 namespace eager_search {
 class EagerSearch : public SearchEngine {
     const bool reopen_closed_nodes;
@@ -37,6 +32,10 @@ class EagerSearch : public SearchEngine {
     std::shared_ptr<PruningMethod> pruning_method;
 
     std::pair<fwdbwd::FwdbwdNode, bool> fetch_next_node();
+    SearchStatus forward_step(fwdbwd::FwdbwdNode fwdbwd_node);
+    SearchStatus backward_step(fwdbwd::FwdbwdNode fwdbwd_node);
+    void insert_state();
+
     void start_f_value_statistics(EvaluationContext &eval_context);
     void update_f_value_statistics(const SearchNode &node);
     void reward_progress();

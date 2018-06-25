@@ -6,7 +6,6 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <utility>
-#include <tuple>
 
 #include "state_id.h"
 
@@ -94,5 +93,23 @@ public:
   // returns false if the state if already there, else true
   bool store_state(StateID state_id);
 };
+
+namespace fwdbwd{
+    using FwdbwdOps = std::pair<OperatorID, bool>;
+    class FwdbwdNode{
+        StateID id;
+        OperatorID op_id;
+        OpStackNode* op_stack;
+        int state_g_value;
+    public:
+        FwdbwdNode(StateID state_id, OperatorID operator_id, OpStackNode* op_stack_node, int g_value);
+        StateID get_state() const {return id;}
+        OperatorID get_operator() const {return op_id;}
+        OpStackNode* get_stack_pointer() const {return op_stack;}
+        int get_g() const{return state_g_value;}
+
+        bool operator<(const FwdbwdNode& rhs) const;
+    };
+}
 
 #endif

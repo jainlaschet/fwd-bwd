@@ -4,12 +4,14 @@
 #include "../open_list.h"
 #include "../option_parser.h"
 #include "../plugin.h"
+#include "../operator_id.h"
 
 #include "../utils/memory.h"
 
 #include <cassert>
 #include <deque>
 #include <map>
+#include <set>
 
 using namespace std;
 
@@ -17,8 +19,13 @@ namespace standard_scalar_open_list {
 template<class Entry>
 class StandardScalarOpenList : public OpenList<Entry> {
     typedef deque<Entry> Bucket;
+    typedef multiset<fwdbwd::FwdbwdNode> fwdbwdBucket;
+    typedef fwdbwdBucket::iterator fwdbwdBucket_it;
+
 
     map<int, Bucket> buckets;
+    map<int, fwdbwdBucket> fwdbwd_buckets;
+
     int size;
 
     Evaluator *evaluator;
@@ -114,6 +121,49 @@ bool StandardScalarOpenList<Entry>::is_reliable_dead_end(
     EvaluationContext &eval_context) const {
     return is_dead_end(eval_context) && evaluator->dead_ends_are_reliable();
 }
+
+// specialised functions
+
+template<>
+void StandardScalarOpenList<fwdbwd::FwdbwdNode>::do_insertion(
+    EvaluationContext &eval_context, const fwdbwd::FwdbwdNode &entry) {
+    int key = eval_context.get_heuristic_value(evaluator);
+    fwdbwd_buckets[key].insert(entry);
+    ++size;
+    if(entry.get_stack_pointer() == NULL)
+        cout << "Forward Node ->";
+    else
+        cout << "Backward Node ->";
+    cout << "Heuristic Value: " << key << endl;
+}
+
+template<>
+fwdbwd::FwdbwdNode StandardScalarOpenList<fwdbwd::FwdbwdNode>::remove_min(vector<int> *key) {
+    assert(size > 0);
+    auto it = fwdbwd_buckets.begin();
+    assert(it != fwdbwd_buckets.end());
+    if (key) {
+        assert(key->empty());
+        key->push_back(it->first);
+    }
+
+    fwdbwdBucket &bucket = it->second;
+    assert(!bucket.empty());
+    fwdbwdBucket_it itr = bucket.begin();
+    fwdbwd::FwdbwdNode result = *itr;
+    bucket.erase(itr);
+    if (bucket.empty())
+        fwdbwd_buckets.erase(it);
+    --size;
+    return result;
+}
+
+template<>
+void StandardScalarOpenList<fwdbwd::FwdbwdNode>::clear() {
+    fwdbwd_buckets.clear();
+    size = 0;
+}
+
 
 StandardScalarOpenListFactory::StandardScalarOpenListFactory(
     const Options &options)
