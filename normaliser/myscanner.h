@@ -1,0 +1,11 @@
+#define ACTION 1
+#define ACTION_NAME 2
+#define PARAMETER 3
+#define PARAMETERS 4
+#define PRECONDITION 5
+#define EFFECT 6
+#define CONJUNCTION 7
+#define NEGATION 8
+#define PREDICATE 9
+#define RIGHT_BRACKET 10
+
