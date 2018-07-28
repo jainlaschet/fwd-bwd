@@ -145,7 +145,7 @@ void StandardScalarOpenList<fwdbwd::FwdbwdNode>::do_insertion(
     {
         // in the case of backward node, the key value should be heuristics 
         // plus the g_cost of all elements in the stack.
-        key += entry.get_stack_pointer()->get_cost();
+        // key += entry.get_stack_pointer()->get_cost();
         bwd_buckets[key].insert(entry);
         ++bwd_size;
     }

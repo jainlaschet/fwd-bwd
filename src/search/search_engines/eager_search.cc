@@ -24,6 +24,31 @@ namespace fwdbwd{
     unordered_map<OperatorID, vector<OperatorID> > inverse_map;   
     OpStackNode* stack_root = new OpStackNode(OperatorID::no_operator, NULL);
     unordered_map<StateID, unordered_set<OperatorID> > forward_nodes;
+    unordered_map<OperatorID, bool> goal_fact_ops;
+
+    /* TODO: This method works with partial TNF only, if in future, SAS TNF is used
+    repair this function*/
+
+    void generate_goal_fact_ops(TaskProxy task_proxy)
+    {
+        for(OperatorProxy operator_proxy: task_proxy.get_operators())
+        {
+            bool flag = false;
+            for (FactProxy goal_fact : task_proxy.get_goals())
+            {
+                for(EffectProxy e: operator_proxy.get_effects())
+                {
+                    if(e.get_fact() == goal_fact)
+                    {
+                        flag = true;
+                        for(FactProxy p: operator_proxy.get_preconditions())
+                            flag = (e.get_fact() == p)? false: flag;
+                    }
+                }    
+            }
+            goal_fact_ops[operator_proxy.get_gid()] = flag;
+        }
+    }
 
     bool are_dependent(EffectsProxy eff, PreconditionsProxy pre)
     {
@@ -77,7 +102,7 @@ namespace fwdbwd{
     {
         vector<OperatorID> base_ops;
         
-        if(op_id == OperatorID::no_operator)
+        if((op_id == OperatorID::no_operator) || goal_fact_ops[op_id])
             base_ops = applicable_ops;
         else
             base_ops = inverse_map[op_id];
@@ -120,6 +145,7 @@ void EagerSearch::initialize() {
 
     // fwdbwd code
     fwdbwd::generate_dependency_graph(task_proxy);
+    fwdbwd::generate_goal_fact_ops(task_proxy);
     // fwdbwd code
 
     set<Evaluator *> evals;
@@ -164,7 +190,7 @@ void EagerSearch::initialize() {
 
         open_list->insert(eval_context, fwdbwd_node);
     }
-
+    
     print_initial_h_values(eval_context);
 
     pruning_method->initialize(task);
@@ -191,9 +217,15 @@ SearchStatus EagerSearch::step() {
     fwdbwd::FwdbwdNode fwdbwd_node = n.first;
 
     if(!fwdbwd_node.get_stack_pointer())
+    {
+        // cout << "Forward Step" << endl;
         return forward_step(fwdbwd_node);
+    }
     else
+    {
+        // cout << "Backward Step" << endl;
         return backward_step(fwdbwd_node);
+    }
 }
 
 SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
@@ -217,6 +249,7 @@ SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
         collect_preferred_operators(eval_context, preferred_operator_heuristics);
 
     vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, fwdbwd_node.get_operator());
+
 
 
     for (fwdbwd::FwdbwdOps fwdbwd_op: fwdbwd_ops) {
@@ -289,13 +322,15 @@ SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
         {
             // push the current and all it's dependent ones on the stack
             // also check if you've observed the same pair before
-            pair<OpStackNode*, bool> first_child = fwdbwd::stack_root->gen_child(op_id, id);
+
+            pair<OpStackNode*, bool> first_child = fwdbwd::stack_root->gen_child(op_id, id, op.get_cost());
             if(first_child.second)
             {
                 // careful op_id already in use
                 for (OperatorID oid: fwdbwd::dependency_map[op_id])
                 {
-                    pair<OpStackNode*, bool> second_child = (first_child.first)->gen_child(oid, id);
+                    OperatorProxy op2 = task_proxy.get_operators()[oid];
+                    pair<OpStackNode*, bool> second_child = (first_child.first)->gen_child(oid, id, op2.get_cost());
                     if(second_child.second)
                     {
                         // Now push this backward into the open list
@@ -320,9 +355,6 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     StateID id = fwdbwd_node.get_state();
     GlobalState s = state_registry.lookup_state(id);
     SearchNode node = search_space.get_node(s);
-
-    if (check_goal_and_set_plan(s))
-        return SOLVED;
 
     vector<OperatorID> applicable_ops;
     g_successor_generator->generate_applicable_ops(s, applicable_ops);
@@ -365,6 +397,10 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
         }
 
         if (succ_node.is_new()) {
+
+            if (check_goal_and_set_plan(s))
+                cout << "GIGGTY!" << endl;
+
             int succ_g = node.get_g() + get_adjusted_cost(op);
             EvaluationContext eval_context(
                 succ_state, succ_g, is_preferred, &statistics);
@@ -382,12 +418,14 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
 
             if(parent_op_stack_node == fwdbwd::stack_root)
             {
+                // cout << "VERY GOOD WARNING -- 1" << endl;
                 fwdbwd::forward_nodes[succ_state.get_id()].insert(op_id);
                 fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), op_id, NULL, succ_node.get_real_g());
                 open_list->insert(eval_context, succ_fwdbwd_node);
             }
             else
             {
+                // cout << "GOOD WARNING -- 1" << endl;
                 fwdbwd::FwdbwdNode succ_fwdbwd_node(succ_state.get_id(), OperatorID::no_operator, parent_op_stack_node, succ_node.get_real_g());
                 open_list->insert(eval_context, succ_fwdbwd_node);
             }
@@ -426,7 +464,9 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     {
         for (OperatorID oid : (fwdbwd::dependency_map[op_stack_node->get_operator()]))
         {
-            pair<OpStackNode*, bool> child = op_stack_node->gen_child(oid, id);
+            OperatorProxy op = task_proxy.get_operators()[oid];
+            pair<OpStackNode*, bool> child = op_stack_node->gen_child(oid, id, op.get_cost());
+
             if(child.second)
             {
                 fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, child.first, fwdbwd_node.get_g());

@@ -76,19 +76,22 @@ class OpStackNode{
 
   // represents stack size
   int depth;
+  // represents sum of g_values of all operator
+  int cost;
   
   // stores state for duplicate detection
   std::unordered_set<StateID> state_storage;
 
 public:
-  OpStackNode(OperatorID operator_id, OpStackNode* parent);
+  OpStackNode(OperatorID operator_id, OpStackNode* parent, int op_cost=0);
 
   OperatorID get_operator();
   OpStackNode* get_parent();
   int get_depth();
+  int get_cost();
 
   /* generates child, pair.second is false if state already requested here */
-  std::pair<OpStackNode*, bool> gen_child(OperatorID operator_id, StateID state_id);
+  std::pair<OpStackNode*, bool> gen_child(OperatorID operator_id, StateID state_id, int op_cost);
 
   // returns false if the state if already there, else true
   bool store_state(StateID state_id);

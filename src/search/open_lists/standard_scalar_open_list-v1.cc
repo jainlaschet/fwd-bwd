@@ -19,21 +19,14 @@ namespace standard_scalar_open_list {
 template<class Entry>
 class StandardScalarOpenList : public OpenList<Entry> {
     typedef deque<Entry> Bucket;
-    typedef multiset<fwdbwd::FwdbwdNode> fwdBucket;
-    typedef multiset<fwdbwd::FwdbwdNode> bwdBucket;
-    typedef fwdBucket::iterator fwdbwdBucket_it;
+    typedef multiset<fwdbwd::FwdbwdNode> fwdbwdBucket;
+    typedef fwdbwdBucket::iterator fwdbwdBucket_it;
 
 
     map<int, Bucket> buckets;
-    map<int, fwdBucket> fwd_buckets;
-    map<int, bwdBucket> bwd_buckets;
+    map<int, fwdbwdBucket> fwdbwd_buckets;
 
     int size;
-    int fwd_size;
-    int bwd_size;    
-
-    bool flag;
-
 
     Evaluator *evaluator;
 
@@ -61,9 +54,6 @@ template<class Entry>
 StandardScalarOpenList<Entry>::StandardScalarOpenList(const Options &opts)
     : OpenList<Entry>(opts.get<bool>("pref_only")),
       size(0),
-      fwd_size(0),
-      bwd_size(0),
-      flag(true),
       evaluator(opts.get<Evaluator *>("eval")) {
 }
 
@@ -72,9 +62,6 @@ StandardScalarOpenList<Entry>::StandardScalarOpenList(
     Evaluator *evaluator, bool preferred_only)
     : OpenList<Entry>(preferred_only),
       size(0),
-      fwd_size(0),
-      bwd_size(0),
-      flag(true),
       evaluator(evaluator) {
 }
 
@@ -141,82 +128,37 @@ template<>
 void StandardScalarOpenList<fwdbwd::FwdbwdNode>::do_insertion(
     EvaluationContext &eval_context, const fwdbwd::FwdbwdNode &entry) {
     int key = eval_context.get_heuristic_value(evaluator);
+    fwdbwd_buckets[key].insert(entry);
     if(entry.get_stack_pointer() != NULL)
-    {
-        // in the case of backward node, the key value should be heuristics 
-        // plus the g_cost of all elements in the stack.
         key += entry.get_stack_pointer()->get_cost();
-        bwd_buckets[key].insert(entry);
-        ++bwd_size;
-    }
-    else
-    {
-        fwd_buckets[key].insert(entry);
-        ++fwd_size;
-    }
+    ++size;
 }
 
 template<>
 fwdbwd::FwdbwdNode StandardScalarOpenList<fwdbwd::FwdbwdNode>::remove_min(vector<int> *key) {
-    assert(fwd_size > 0 || bwd_size > 0);
-    flag = !flag;
-    if(flag && (fwd_size == 0))
-        flag = !flag;
-    else if(!flag && (bwd_size == 0))
-        flag = !flag;
-    if(flag)
-    {
-        auto it = fwd_buckets.begin();
-        assert(it != fwd_buckets.end());
-        if (key) {
-            assert(key->empty());
-            key->push_back(it->first);
-        }
-
-        fwdBucket &bucket = it->second;
-        // cout << "Remove min heuristic: " << it->first << endl;
-        assert(!bucket.empty());
-        fwdbwdBucket_it itr = bucket.begin();
-        fwdbwd::FwdbwdNode result = *itr;
-        bucket.erase(itr);
-        if (bucket.empty())
-            fwd_buckets.erase(it);
-        --fwd_size;
-        return result;
+    assert(size > 0);
+    auto it = fwdbwd_buckets.begin();
+    assert(it != fwdbwd_buckets.end());
+    if (key) {
+        assert(key->empty());
+        key->push_back(it->first);
     }
-    else
-    {
-        auto it = bwd_buckets.begin();
-        assert(it != bwd_buckets.end());
-        if (key) {
-            assert(key->empty());
-            key->push_back(it->first);
-        }
 
-        bwdBucket &bucket = it->second;
-        // cout << "Remove min heuristic: " << it->first << endl;
-        assert(!bucket.empty());
-        fwdbwdBucket_it itr = bucket.begin();
-        fwdbwd::FwdbwdNode result = *itr;
-        bucket.erase(itr);
-        if (bucket.empty())
-            bwd_buckets.erase(it);
-        --bwd_size;
-        return result;
-    }
+    fwdbwdBucket &bucket = it->second;
+    assert(!bucket.empty());
+    fwdbwdBucket_it itr = bucket.begin();
+    fwdbwd::FwdbwdNode result = *itr;
+    bucket.erase(itr);
+    if (bucket.empty())
+        fwdbwd_buckets.erase(it);
+    --size;
+    return result;
 }
 
 template<>
 void StandardScalarOpenList<fwdbwd::FwdbwdNode>::clear() {
-    fwd_buckets.clear();
-    bwd_buckets.clear();
-    fwd_size = 0;
-    bwd_size = 0;
-}
-
-template<>
-bool StandardScalarOpenList<fwdbwd::FwdbwdNode>::empty() const {
-    return ((fwd_size == 0) && (bwd_size == 0));
+    fwdbwd_buckets.clear();
+    size = 0;
 }
 
 

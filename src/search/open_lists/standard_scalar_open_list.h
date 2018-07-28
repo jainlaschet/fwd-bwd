@@ -12,6 +12,7 @@
 */
 
 namespace standard_scalar_open_list {
+
 class StandardScalarOpenListFactory : public OpenListFactory {
     Options options;
 public:
