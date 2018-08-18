@@ -9,6 +9,8 @@
 
 #include "../algorithms/ordered_set.h"
 #include "../task_utils/successor_generator.h"
+#include "../task_utils/task_properties.h"
+#include "../tasks/root_task.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -29,6 +31,7 @@ namespace fwdbwd{
     /* TODO: This method works with partial TNF only, if in future, SAS TNF is used
     repair this function*/
 
+
     void generate_goal_fact_ops(TaskProxy task_proxy)
     {
         for(OperatorProxy operator_proxy: task_proxy.get_operators())
@@ -44,19 +47,37 @@ namespace fwdbwd{
                         for(FactProxy p: operator_proxy.get_preconditions())
                             flag = (e.get_fact() == p)? false: flag;
                     }
-                }    
+                }
+                // important
+                if(flag)
+                    break;
             }
             goal_fact_ops[operator_proxy.get_gid()] = flag;
         }
     }
-
-    bool are_dependent(EffectsProxy eff, PreconditionsProxy pre)
+    
+    bool are_dependent(EffectsProxy eff1, PreconditionsProxy pre1, PreconditionsProxy pre2)
     {
         // return true if there are some common facts else false
-        for(EffectProxy e: eff)
-            for (FactProxy p : pre)
-                if(p == e.get_fact())
-                    return true;
+        bool flag;
+        for (FactProxy p2 : pre2)
+        {
+            flag = true;
+            for(EffectProxy e1: eff1)
+            {
+                if(p2.get_variable() == e1.get_fact().get_variable())
+                {
+                    if(p2.get_value() == e1.get_fact().get_value())
+                        return true;
+                    else
+                        flag = false;
+                }
+            }
+            if(flag)
+                for(FactProxy p1: pre1)
+                    if(p2 == p1)
+                        return true;
+        }
         return false;
     }
 
@@ -73,6 +94,7 @@ namespace fwdbwd{
 
         else if(op_stack != NULL && rhs.get_stack_pointer() != NULL)
             return op_stack->get_depth() < rhs.get_stack_pointer()->get_depth();
+        
         else
             return (op_stack == NULL)? true: false;
     }
@@ -83,41 +105,23 @@ namespace fwdbwd{
         OperatorsProxy operators = task_proxy.get_operators();
         
         for (OperatorProxy op1 : operators)
+        {
             for(OperatorProxy op2 : operators)
             {
                 if(op1 != op2)
                 {
                     PreconditionsProxy pre1 = op1.get_preconditions();
+                    PreconditionsProxy pre2 = op2.get_preconditions();
                     EffectsProxy eff2 = op2.get_effects();
-                    if(are_dependent(eff2, pre1))
+                    if(are_dependent(eff2, pre2, pre1))
                     {
                         dependency_map[op1.get_gid()].push_back(op2.get_gid());
                         inverse_map[op2.get_gid()].push_back(op1.get_gid());
+                        // cout << op1.get_name() << " gets pre from " << op2.get_name() << endl;
                     }
                 }
             }
-    }
-
-    vector<FwdbwdOps> generate_fwdbwd_ops(vector<OperatorID> applicable_ops, OperatorID op_id)
-    {
-        vector<OperatorID> base_ops;
-        
-        if((op_id == OperatorID::no_operator) || goal_fact_ops[op_id])
-            base_ops = applicable_ops;
-        else
-            base_ops = inverse_map[op_id];
-
-        vector<FwdbwdOps> fwdbwd_ops;
-
-        for(OperatorID id: base_ops)
-        {
-            if(find(applicable_ops.begin(), applicable_ops.end(), id) != applicable_ops.end())
-                fwdbwd_ops.push_back(make_pair(id, true));
-            else
-                fwdbwd_ops.push_back(make_pair(id, false));
         }
-
-        return fwdbwd_ops;
     }
 
 }
@@ -218,12 +222,12 @@ SearchStatus EagerSearch::step() {
 
     if(!fwdbwd_node.get_stack_pointer())
     {
-        // cout << "Forward Step" << endl;
+        cout << "Forward Step" << endl;
         return forward_step(fwdbwd_node);
     }
     else
     {
-        // cout << "Backward Step" << endl;
+        cout << "Backward Step" << endl;
         return backward_step(fwdbwd_node);
     }
 }
@@ -238,17 +242,16 @@ SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     if (check_goal_and_set_plan(s))
         return SOLVED;
 
-    vector<OperatorID> applicable_ops;
-    g_successor_generator->generate_applicable_ops(s, applicable_ops);
+    
 
-    pruning_method->prune_operators(s, applicable_ops);
+    // pruning_method->prune_operators(s, applicable_ops);
 
     // This evaluates the expanded state (again) to get preferred ops
     EvaluationContext eval_context(s, node.get_g(), false, &statistics, true);
     ordered_set::OrderedSet<OperatorID> preferred_operators =
         collect_preferred_operators(eval_context, preferred_operator_heuristics);
 
-    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = fwdbwd::generate_fwdbwd_ops(applicable_ops, fwdbwd_node.get_operator());
+    vector<fwdbwd::FwdbwdOps> fwdbwd_ops = generate_fwdbwd_ops(s, fwdbwd_node.get_operator());
 
 
 
@@ -359,22 +362,24 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     vector<OperatorID> applicable_ops;
     g_successor_generator->generate_applicable_ops(s, applicable_ops);
 
-    pruning_method->prune_operators(s, applicable_ops);
+    OperatorID op_id = op_stack_node->get_operator();
+    OperatorProxy op = task_proxy.get_operators()[op_id];
+
+    // pruning_method->prune_operators(s, applicable_ops);
 
     EvaluationContext eval_context(s, node.get_g(), false, &statistics, true);
 
     ordered_set::OrderedSet<OperatorID> preferred_operators =
         collect_preferred_operators(eval_context, preferred_operator_heuristics);
-        
-
-    if(find(applicable_ops.begin(), applicable_ops.end(), op_stack_node->get_operator()) != applicable_ops.end())
+    
+    // OPTIMIZE: no need to generate all applicable ops, just check if op is applicable in state
+    if(task_properties::is_applicable(op, convert_global_state(s)))
+     // if(find(applicable_ops.begin(), applicable_ops.end(), op_id) != applicable_ops.end())
     {
         // apply the top stack operator to the current state
         // and push the data entry into the new stack
         // if the current operator_stack_pointer is equal to stack_root
         // then stop the search
-        OperatorID op_id = op_stack_node->get_operator();
-        OperatorProxy op = task_proxy.get_operators()[op_id];
         bool is_preferred = preferred_operators.contains(op_id);
 
         if ((node.get_real_g() + op.get_cost()) >= bound)
@@ -398,8 +403,7 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
 
         if (succ_node.is_new()) {
 
-            if (check_goal_and_set_plan(s))
-                cout << "GIGGTY!" << endl;
+            // OPTIMIZE: Can we do something about the goal states found here?
 
             int succ_g = node.get_g() + get_adjusted_cost(op);
             EvaluationContext eval_context(
@@ -572,4 +576,40 @@ void EagerSearch::update_f_value_statistics(const SearchNode &node) {
         statistics.report_f_value_progress(f_value);
     }
 }
+
+State EagerSearch::convert_global_state(const GlobalState &global_state) const {
+    State state(*tasks::g_root_task, global_state.get_values());
+    return task_proxy.convert_ancestor_state(state);
+}
+
+vector<fwdbwd::FwdbwdOps> EagerSearch::generate_fwdbwd_ops(GlobalState s, OperatorID op_id)
+{
+        vector<OperatorID> base_ops;
+        vector<fwdbwd::FwdbwdOps> fwdbwd_ops;
+
+        
+        if((op_id == OperatorID::no_operator) || fwdbwd::goal_fact_ops[op_id])
+        {
+            g_successor_generator->generate_applicable_ops(s, base_ops);
+            for(OperatorID id: base_ops)
+                fwdbwd_ops.push_back(make_pair(id, true));
+        }
+        else
+        {
+            base_ops = fwdbwd::inverse_map[op_id];
+            State state = convert_global_state(s);
+
+            for(OperatorID id: base_ops)
+            {
+                OperatorProxy op = task_proxy.get_operators()[id];
+                if(task_properties::is_applicable(op, state))
+                    fwdbwd_ops.push_back(make_pair(id, true));
+                else
+                    fwdbwd_ops.push_back(make_pair(id, false));
+            }
+        }
+
+        return fwdbwd_ops;
+    }
+
 }

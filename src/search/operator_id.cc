@@ -22,8 +22,8 @@ OpStackNode::OpStackNode(OperatorID operator_id, OpStackNode* parent, int op_cos
 	}
 	else
 	{
-		depth = parent->depth + 1;
 		cost = parent->cost + op_cost;
+		depth = parent->depth + 1;
 	}
 }
 
@@ -39,8 +39,7 @@ int OpStackNode::get_depth(){
 	return depth;
 }
 
-int OpStackNode::get_cost()
-{
+int OpStackNode::get_cost(){
 	return cost;
 }
 

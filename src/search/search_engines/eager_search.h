@@ -40,6 +40,8 @@ class EagerSearch : public SearchEngine {
     void update_f_value_statistics(const SearchNode &node);
     void reward_progress();
     void print_checkpoint_line(int g) const;
+    State convert_global_state(const GlobalState &global_state) const;
+    std::vector<fwdbwd::FwdbwdOps> generate_fwdbwd_ops(GlobalState s, OperatorID op_id);
 
 protected:
     virtual void initialize() override;

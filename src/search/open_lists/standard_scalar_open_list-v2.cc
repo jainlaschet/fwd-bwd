@@ -145,7 +145,7 @@ void StandardScalarOpenList<fwdbwd::FwdbwdNode>::do_insertion(
     {
         // in the case of backward node, the key value should be heuristics 
         // plus the g_cost of all elements in the stack.
-        // key += entry.get_stack_pointer()->get_cost();
+        key += entry.get_stack_pointer()->get_cost();
         bwd_buckets[key].insert(entry);
         ++bwd_size;
     }
@@ -159,10 +159,11 @@ void StandardScalarOpenList<fwdbwd::FwdbwdNode>::do_insertion(
 template<>
 fwdbwd::FwdbwdNode StandardScalarOpenList<fwdbwd::FwdbwdNode>::remove_min(vector<int> *key) {
     assert(fwd_size > 0 || bwd_size > 0);
-    flag = !flag;
-    if(flag && (fwd_size == 0))
-        flag = !flag;
-    else if(!flag && (bwd_size == 0))
+    if(fwd_size == 0)
+        flag = false;
+    else if(bwd_size == 0)
+        flag = true;
+    else
         flag = !flag;
     if(flag)
     {
