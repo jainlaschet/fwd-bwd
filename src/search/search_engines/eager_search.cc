@@ -26,7 +26,11 @@ namespace fwdbwd{
     unordered_map<OperatorID, vector<OperatorID> > inverse_map;   
     OpStackNode* stack_root = new OpStackNode(OperatorID::no_operator, NULL);
     unordered_map<StateID, unordered_set<OperatorID> > forward_nodes;
+    // stores all the operators that have interacted with the state and save it so that it's not repeated
+    unordered_map<StateID, unordered_map<OperatorID, bool> > node_history;
     unordered_map<OperatorID, bool> goal_fact_ops;
+    // true if all actions are applied to this node else false;
+    unordered_map<StateID, bool> privilege_node;
 
     /* TODO: This method works with partial TNF only, if in future, SAS TNF is used
     repair this function*/
@@ -39,13 +43,19 @@ namespace fwdbwd{
             bool flag = false;
             for (FactProxy goal_fact : task_proxy.get_goals())
             {
-                for(EffectProxy e: operator_proxy.get_effects())
+                for(EffectProxy effect: operator_proxy.get_effects())
                 {
-                    if(e.get_fact() == goal_fact)
+                    FactProxy e = effect.get_fact();
+                    if(e == goal_fact)
                     {
                         flag = true;
                         for(FactProxy p: operator_proxy.get_preconditions())
-                            flag = (e.get_fact() == p)? false: flag;
+                        {
+                            // check if the variable is same
+                            // check that the values are opposite
+                            if(e.get_variable() == p.get_variable())
+                                flag = (e.get_value() == p.get_value())? false: flag;
+                        }
                     }
                 }
                 // important
@@ -122,6 +132,19 @@ namespace fwdbwd{
                 }
             }
         }
+    }
+
+    bool record_history(StateID id, OperatorID op_id)
+    {
+        bool value = node_history[id][op_id]; 
+        if(!value)
+            node_history[id][op_id] = true;
+        return value;
+    }
+
+    bool check_history(StateID id, OperatorID op_id)
+    {
+        return node_history[id][op_id];
     }
 
 }
@@ -222,12 +245,12 @@ SearchStatus EagerSearch::step() {
 
     if(!fwdbwd_node.get_stack_pointer())
     {
-        cout << "Forward Step" << endl;
+        // cout << "Forward Step" << endl;
         return forward_step(fwdbwd_node);
     }
     else
     {
-        cout << "Backward Step" << endl;
+        // cout << "Backward Step" << endl;
         return backward_step(fwdbwd_node);
     }
 }
@@ -241,7 +264,8 @@ SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
 
     if (check_goal_and_set_plan(s))
         return SOLVED;
-
+    if(fwdbwd::privilege_node[id])
+        return IN_PROGRESS;
     
 
     // pruning_method->prune_operators(s, applicable_ops);
@@ -259,6 +283,11 @@ SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
 
         OperatorID op_id = fwdbwd_op.first;
         OperatorProxy op = task_proxy.get_operators()[op_id];
+
+
+        if(fwdbwd::record_history(id, op_id))
+            break;
+
         if(fwdbwd_op.second)
         {
             if ((node.get_real_g() + op.get_cost()) >= bound)
@@ -332,13 +361,15 @@ SearchStatus EagerSearch::forward_step(fwdbwd::FwdbwdNode fwdbwd_node)
                 // careful op_id already in use
                 for (OperatorID oid: fwdbwd::dependency_map[op_id])
                 {
-                    OperatorProxy op2 = task_proxy.get_operators()[oid];
-                    pair<OpStackNode*, bool> second_child = (first_child.first)->gen_child(oid, id, op2.get_cost());
-                    if(second_child.second)
+                    if(!fwdbwd::check_history(id, oid))
                     {
-                        // Now push this backward into the open list
-                        fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, second_child.first, node.get_real_g());
-                        open_list->insert(eval_context, succ_fwdbwd_node);
+                        OperatorProxy op2 = task_proxy.get_operators()[oid];
+                        pair<OpStackNode*, bool> second_child = (first_child.first)->gen_child(oid, id, op2.get_cost());
+                        if(second_child.second)
+                        {
+                            fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, second_child.first, node.get_real_g());
+                            open_list->insert(eval_context, succ_fwdbwd_node);
+                        }
                     }
                 }
             }
@@ -359,13 +390,11 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     GlobalState s = state_registry.lookup_state(id);
     SearchNode node = search_space.get_node(s);
 
-    vector<OperatorID> applicable_ops;
-    g_successor_generator->generate_applicable_ops(s, applicable_ops);
-
     OperatorID op_id = op_stack_node->get_operator();
     OperatorProxy op = task_proxy.get_operators()[op_id];
 
-    // pruning_method->prune_operators(s, applicable_ops);
+    // if(!fwdbwd::check_history(id, op_id))
+    //     return IN_PROGRESS;
 
     EvaluationContext eval_context(s, node.get_g(), false, &statistics, true);
 
@@ -374,7 +403,6 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     
     // OPTIMIZE: no need to generate all applicable ops, just check if op is applicable in state
     if(task_properties::is_applicable(op, convert_global_state(s)))
-     // if(find(applicable_ops.begin(), applicable_ops.end(), op_id) != applicable_ops.end())
     {
         // apply the top stack operator to the current state
         // and push the data entry into the new stack
@@ -468,13 +496,15 @@ SearchStatus EagerSearch::backward_step(fwdbwd::FwdbwdNode fwdbwd_node)
     {
         for (OperatorID oid : (fwdbwd::dependency_map[op_stack_node->get_operator()]))
         {
-            OperatorProxy op = task_proxy.get_operators()[oid];
-            pair<OpStackNode*, bool> child = op_stack_node->gen_child(oid, id, op.get_cost());
-
-            if(child.second)
+            if(!fwdbwd::record_history(id, oid))
             {
-                fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, child.first, fwdbwd_node.get_g());
-                open_list->insert(eval_context, succ_fwdbwd_node);
+                OperatorProxy op = task_proxy.get_operators()[oid];
+                pair<OpStackNode*, bool> child = op_stack_node->gen_child(oid, id, op.get_cost());
+                if(child.second)
+                {
+                    fwdbwd::FwdbwdNode succ_fwdbwd_node(id, OperatorID::no_operator, child.first, fwdbwd_node.get_g());
+                    open_list->insert(eval_context, succ_fwdbwd_node);
+                }
             }
         }
     }
@@ -585,12 +615,15 @@ State EagerSearch::convert_global_state(const GlobalState &global_state) const {
 vector<fwdbwd::FwdbwdOps> EagerSearch::generate_fwdbwd_ops(GlobalState s, OperatorID op_id)
 {
         vector<OperatorID> base_ops;
+        vector<OperatorID> fwd_ops;
+        vector<OperatorID> bwd_ops;
         vector<fwdbwd::FwdbwdOps> fwdbwd_ops;
 
         
         if((op_id == OperatorID::no_operator) || fwdbwd::goal_fact_ops[op_id])
         {
             g_successor_generator->generate_applicable_ops(s, base_ops);
+            fwdbwd::privilege_node[s.get_id()] = true;
             for(OperatorID id: base_ops)
                 fwdbwd_ops.push_back(make_pair(id, true));
         }
@@ -603,10 +636,16 @@ vector<fwdbwd::FwdbwdOps> EagerSearch::generate_fwdbwd_ops(GlobalState s, Operat
             {
                 OperatorProxy op = task_proxy.get_operators()[id];
                 if(task_properties::is_applicable(op, state))
-                    fwdbwd_ops.push_back(make_pair(id, true));
+                    fwd_ops.push_back(id);
                 else
-                    fwdbwd_ops.push_back(make_pair(id, false));
+                    bwd_ops.push_back(id);
             }
+            
+            // doing this so that all forward ones are applied first
+            for(OperatorID id: fwd_ops)
+                fwdbwd_ops.push_back(make_pair(id, true));
+            for(OperatorID id: bwd_ops)
+                fwdbwd_ops.push_back(make_pair(id, false));
         }
 
         return fwdbwd_ops;
